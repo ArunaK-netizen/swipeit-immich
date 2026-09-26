@@ -8,6 +8,8 @@ import 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from '@/context/AuthContext';
 import { StyleSheet } from 'react-native';
+import { useAppUpdate } from '@/hooks/useAppUpdate';
+import { UpdateModal } from '@/components/UpdateModal';
 
 export {
   ErrorBoundary,
@@ -20,6 +22,8 @@ export const unstable_settings = {
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  const { isUpdateAvailable, isDownloading, manifest, performUpdate, cancelUpdate } = useAppUpdate();
+
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,
@@ -47,6 +51,13 @@ export default function RootLayout() {
             <Stack.Screen name="index" />
             <Stack.Screen name="login" />
           </Stack>
+          <UpdateModal
+            visible={isUpdateAvailable}
+            onUpdate={performUpdate}
+            onCancel={cancelUpdate}
+            isDownloading={isDownloading}
+            manifest={manifest}
+          />
         </ThemeProvider>
       </AuthProvider>
     </GestureHandlerRootView>

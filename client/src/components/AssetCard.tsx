@@ -51,24 +51,11 @@ export function AssetCard({ asset, onSwipe, index }: AssetCardProps) {
 
     const imageUrl = useMemo(() => {
         // Use proxy path. The cookie set in AuthContext will handle the server URL and Auth token.
-
-        // Browser support check: HEIC is not supported in most browsers.
-        // If asset is HEIC, use the generated JPEG thumbnail/preview.
-        // Otherwise, use the original high-res file.
-
-        const isHeic = asset.originalFileName.toLowerCase().endsWith('.heic') ||
-            asset.originalFileName.toLowerCase().endsWith('.heif');
-
-        if (isHeic) {
-            // format=JPEG ensures compatibility. 
-            // We might want `size=preview` if Immich supports it to get better quality than tiny thumb.
-            // Usually /thumbnail returns the 'preview' size by default if not specified or large enough?
-            return `/api/proxy/assets/${asset.id}/thumbnail?format=JPEG`;
-        }
-
-        // Endpoint: /assets/{id}/original
-        return `/api/proxy/assets/${asset.id}/original`;
-    }, [asset.id, asset.originalFileName]);
+        // ALWAYS use the generated JPEG thumbnail/preview for performance.
+        // The 'preview' size from Immich is high enough quality for screen viewing (usually 1080p+),
+        // but significantly smaller (KB vs MB) than the original file.
+        return `/api/proxy/assets/${asset.id}/thumbnail?format=JPEG`;
+    }, [asset.id]);
 
     // Simplified fluid container that wraps the image naturally.
     // We rely on the image's intrinsic aspect ratio.

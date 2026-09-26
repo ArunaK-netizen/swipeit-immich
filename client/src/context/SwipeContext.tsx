@@ -61,7 +61,8 @@ const SwipeContext = createContext<SwipeContextType>({
     queue: [],
     history: [],
     isLoading: false,
-    loadMore: async () => { },
+    loadMore: async () => { }, // Placeholder, we expose it but logic is largely internal hook-driven now
+
     handleSwipe: async () => { },
     handleUndo: async () => { },
     currentAsset: null,
@@ -109,6 +110,8 @@ export const SwipeProvider = ({ children }: { children: React.ReactNode }) => {
     const [albums, setAlbums] = useState<ImmichAlbum[]>([]);
     // Master list of ALL assets in the current album
     const [masterAssets, setMasterAssets] = useState<ImmichAsset[]>([]);
+    // Pagination State
+    const [nextPage, setNextPage] = useState<number | null>(1);
     const loadingRef = useRef(false);
 
     // New: View mode and timeline
@@ -272,9 +275,9 @@ export const SwipeProvider = ({ children }: { children: React.ReactNode }) => {
     useEffect(() => {
         setQueue([]);
         setHistory([]);
-        setMasterAssets([]);
         setTrashQueue([]);
         setSessionCleanedBytes(0);
+        setNextPage(1); // Reset pagination
         loadingRef.current = false;
     }, [albumId, selectedMonth, selectedPerson]);
 
@@ -301,129 +304,123 @@ export const SwipeProvider = ({ children }: { children: React.ReactNode }) => {
     // Ensure we don't go negative
     const remainingCount = Math.max(0, totalAssetsCount - history.length);
 
-    // Initial Load of Album or Month Assets
+    // Load Initial Batch
     useEffect(() => {
-        const loadAssets = async () => {
+        const loadInitial = async () => {
             // Must have either albumId or selectedMonth or selectedPerson
             if ((!albumId && !selectedMonth && !selectedPerson) || loadingRef.current || masterAssets.length > 0) return;
 
-            loadingRef.current = true;
-            setIsLoading(true);
-
-            try {
-                let assets: ImmichAsset[] = [];
-
-                // Pagination loop to fetch ALL assets
-                let allAssets: ImmichAsset[] = [];
-                let page = 1;
-                let hasMore = true;
-
-                while (hasMore) {
-                    let newAssets: ImmichAsset[] = [];
-
-                    if (albumId) {
-                        const { data } = await api.post('/search/metadata', {
-                            albumIds: [albumId],
-                            isTrashed: false,
-                            isArchived: false,
-                            type: 'IMAGE',
-                            withExif: true,
-                            isVisible: true,
-                            page,
-                        });
-                        newAssets = Array.isArray(data) ? data : (data.assets?.items || []);
-                    } else if (selectedMonth) {
-                        const [year, month] = selectedMonth.split('-').map(Number);
-                        const startDate = new Date(year, month - 1, 1);
-                        const endDate = new Date(year, month, 0, 23, 59, 59);
-
-                        const { data } = await api.post('/search/metadata', {
-                            isTrashed: false,
-                            isArchived: false,
-                            type: 'IMAGE',
-                            withExif: true,
-                            isVisible: true,
-                            takenAfter: startDate.toISOString(),
-                            takenBefore: endDate.toISOString(),
-                            page,
-                        });
-                        newAssets = Array.isArray(data) ? data : (data.assets?.items || []);
-                    } else if (selectedPerson) {
-                        const { data } = await api.post('/search/metadata', {
-                            isTrashed: false,
-                            isArchived: false,
-                            type: 'IMAGE',
-                            withExif: true,
-                            isVisible: true,
-                            personIds: [selectedPerson],
-                            page,
-                        });
-                        newAssets = Array.isArray(data) ? data : (data.assets?.items || []);
-                    }
-
-                    if (newAssets.length > 0) {
-                        allAssets = [...allAssets, ...newAssets];
-                        // If we got less than 100 or 250 (api defaults), likely end
-                        // A safer check is if newAssets length < typical limit or just keep going
-                        // If Immich default limit is 250, getting 250 means maybe more.
-                        // We'll increment page.
-                        page++;
-                    } else {
-                        hasMore = false;
-                    }
-
-                    // Safety break
-                    if (page > 100) hasMore = false;
-                }
-
-                console.log(`Loaded ${allAssets.length} total assets`);
-                setMasterAssets(allAssets);
-
-                // Initialize Queue with first 20 items
-                setQueue(allAssets.slice(0, 20));
-
-            } catch (error) {
-                console.error("Failed to fetch assets", error);
-            } finally {
-                setIsLoading(false);
-                // We keep loadingRef true if we are "done" to prevent re-fetching the master list? 
-                // Actually, if we want to "load more" (pagination), we would need a different logic.
-                // But /search/metadata usually returns all or a huge chunk. 
-                // For V1 let's assume it returns all.
-                loadingRef.current = false;
-            }
+            await loadMoreAssets();
         };
 
-        if ((albumId || selectedMonth || selectedPerson) && masterAssets.length === 0) {
-            loadAssets();
+        loadInitial();
+    }, [albumId, selectedMonth, selectedPerson]); // Removed masterAssets.length dependency to avoid loops, explicit check inside
+
+    // Core Fetch Logic
+    const loadMoreAssets = async () => {
+        if (loadingRef.current || nextPage === null) return;
+        if (!albumId && !selectedMonth && !selectedPerson) return;
+
+        loadingRef.current = true;
+        setIsLoading(queue.length === 0); // Only show loading spinner on full screen if it's the first load
+
+        try {
+            console.log(`Fetching page ${nextPage}...`);
+            let newAssets: ImmichAsset[] = [];
+
+            // Common params
+            const commonParams = {
+                isTrashed: false,
+                isArchived: false,
+                type: 'IMAGE',
+                withExif: true,
+                isVisible: true,
+                page: nextPage,
+                size: 100, // Fetch 100 at a time (reasonable balance)
+            };
+
+            if (albumId) {
+                const { data } = await api.post('/search/metadata', {
+                    ...commonParams,
+                    albumIds: [albumId],
+                });
+                newAssets = Array.isArray(data) ? data : (data.assets?.items || []);
+            } else if (selectedMonth) {
+                const [year, month] = selectedMonth.split('-').map(Number);
+                const startDate = new Date(year, month - 1, 1);
+                const endDate = new Date(year, month, 0, 23, 59, 59);
+
+                const { data } = await api.post('/search/metadata', {
+                    ...commonParams,
+                    takenAfter: startDate.toISOString(),
+                    takenBefore: endDate.toISOString(),
+                });
+                newAssets = Array.isArray(data) ? data : (data.assets?.items || []);
+            } else if (selectedPerson) {
+                const { data } = await api.post('/search/metadata', {
+                    ...commonParams,
+                    personIds: [selectedPerson],
+                });
+                newAssets = Array.isArray(data) ? data : (data.assets?.items || []);
+            }
+
+            if (newAssets.length > 0) {
+                // Filter out duplicates just in case
+                setMasterAssets(prev => {
+                    const existingIds = new Set(prev.map(a => a.id));
+                    const uniqueNew = newAssets.filter(a => !existingIds.has(a.id));
+                    return [...prev, ...uniqueNew];
+                });
+
+                // If it's the first load, also populate the queue immediately
+                if (queue.length === 0) {
+                    setQueue(newAssets.slice(0, 20));
+                }
+
+                // Prepare next page
+                // If we got fewer than requested, we are done.
+                if (newAssets.length < 100) {
+                    setNextPage(null);
+                } else {
+                    setNextPage(nextPage + 1);
+                }
+            } else {
+                setNextPage(null);
+            }
+
+        } catch (error) {
+            console.error("Failed to fetch assets", error);
+        } finally {
+            setIsLoading(false);
+            loadingRef.current = false;
         }
-    }, [albumId, selectedMonth, selectedPerson, masterAssets.length]);
+    };
 
 
     // Queue Refill Management
     // As queue gets low, pull next batch from masterAssets
+    // Queue Refill Management & Infinite Scroll
     useEffect(() => {
+        // 1. Refill Queue from MasterAssets
         if (queue.length < 5 && masterAssets.length > 0) {
-            // Find where we are
-            // Queue contains [Index K ... Index K+N]
-            // We need to look at what we have in history + queue to know what's next?
-            // Simpler: Maintain a 'currentIndex' or filter.
-
-            // Re-sync queue from master based on history
             const historyIds = new Set(history.map(h => h.asset.id));
             const nextBatch = masterAssets.filter(a => !historyIds.has(a.id)).slice(0, 20);
 
-            // Only update if different
             if (nextBatch.length > 0 && (queue.length === 0 || nextBatch[0].id !== queue[0].id)) {
-                // Prevent infinite loop if queue is just full of the same items
-                // If nextBatch is effectively what we already have, don't set.
-
-                // Simpler approach: Just use one big state? No, queue is for performance.
-                // Let's just blindly replenish from the remaining pool
                 setQueue(nextBatch);
             }
         }
-    }, [queue.length, masterAssets, history]); // Dependencies need care
+
+        // 2. Trigger Network Fetch if nearing end of MasterAssets
+        // Need to calculate how many unprocessed items we have left in masterAssets
+        const historyIds = new Set(history.map(h => h.asset.id));
+        const unprocessedCount = masterAssets.length - historyIds.size;
+
+        // If we have fewer than 20 items left locally, and there's a next page, fetch more.
+        if (unprocessedCount < 20 && nextPage !== null && !loadingRef.current) {
+            loadMoreAssets();
+        }
+    }, [queue.length, masterAssets, history, nextPage]);
 
 
     const handleSwipe = async (direction: 'left' | 'right') => {
@@ -520,7 +517,8 @@ export const SwipeProvider = ({ children }: { children: React.ReactNode }) => {
             queue,
             history,
             isLoading,
-            loadMore: async () => { }, // Deprecated internal use
+            loadMore: loadMoreAssets,
+
             handleSwipe,
             handleUndo,
             currentAsset: queue[0] || null,

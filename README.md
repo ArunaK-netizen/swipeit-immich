@@ -154,7 +154,12 @@ Then:
 2. Scan the QR code shown in your terminal
 3. The app will load on your device!
 
-> **⚠️ Note:** Your phone and computer must be on the **same network**
+> **⚠️ Note:** Your phone and computer must be on the **same network**. If testing on a physical device via **WSL2** or separate subnets, run `npm run start:tunnel` to expose the Metro bundler securely.
+
+```bash
+# Run with cloud tunnel for physical devices or WSL2:
+npm run start:tunnel
+```
 
 ### Building a Standalone APK/IPA
 

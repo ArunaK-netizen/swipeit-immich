@@ -1,0 +1,80 @@
+name: Deploy Immich Swipe App
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mobile/**'
+  workflow_dispatch: # Manual trigger for full APK build
+
+jobs:
+  build:
+    name: Build Production APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./mobile
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Build with EAS
+        run: |
+          set -euo pipefail
+          IFS=$'\n\t'
+          
+          mkdir -p ./artifacts
+          eas build --platform android --profile production --non-interactive --wait --json > build_result.json
+          
+          ARTIFACT_URL=$(jq -r '.[0].artifacts.buildUrl' build_result.json)
+          if [ -z "$ARTIFACT_URL" ] || [ "$ARTIFACT_URL" = "null" ]; then
+            echo "Error: ARTIFACT_URL is empty or null. Check build_result.json."
+            exit 1
+          fi
+          
+          echo "Downloading artifact from $ARTIFACT_URL..."
+          if ! curl -fSL "$ARTIFACT_URL" -o ./artifacts/app.apk; then
+            echo "Error: curl failed to download the artifact."
+            exit 1
+          fi
+          
+          if [ ! -s ./artifacts/app.apk ]; then
+            echo "Error: ./artifacts/app.apk does not exist or has zero size."
+            exit 1
+          fi
+        env:
+          EXPO_TOKEN: ${{ secrets.EAS_TOKEN }}
+
+      - name: Upload Private Artifact (Downloadable from GitHub Actions tab)
+        uses: actions/upload-artifact@v4
+        with:
+          name: immich-swipe-release
+          path: ./mobile/artifacts/
+
+      # Uncomment the block below when you are ready to publish public GitHub releases
+      # - name: Release APK
+      #   uses: softprops/action-gh-release@v1
+      #   with:
+      #     tag_name: build-${{ github.run_number }}
+      #     name: Release build-${{ github.run_number }}
+      #     draft: false
+      #     prerelease: false
+      #     files: ./mobile/artifacts/*.apk
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

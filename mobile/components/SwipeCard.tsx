@@ -36,16 +36,13 @@ export function SwipeCard({ asset, onSwipe }: SwipeCardProps) {
     }, [asset.id, serverUrl]);
 
     // Full resolution image URL
+    // Optimization: WE USE THE PREVIEW THUMBNAIL AS THE "FULL" IMAGE 
+    // This is because loading 5-10MB originals for every swipe is too slow.
+    // The 'preview' format from Immich is high quality enough for mobile screens.
     const imageUrl = React.useMemo(() => {
         if (!serverUrl) return null;
-        const isHeic = asset.originalFileName.toLowerCase().endsWith('.heic') ||
-            asset.originalFileName.toLowerCase().endsWith('.heif');
-
-        if (isHeic) {
-            return thumbnailUrl; // HEIC uses thumbnail anyway
-        }
-        return `${serverUrl}/api/assets/${asset.id}/original`;
-    }, [asset.id, asset.originalFileName, serverUrl, thumbnailUrl]);
+        return `${serverUrl}/api/assets/${asset.id}/thumbnail?format=JPEG`;
+    }, [asset.id, serverUrl]);
 
     const panGesture = Gesture.Pan()
         .onUpdate((event) => {

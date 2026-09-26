@@ -31,9 +31,8 @@ function SwipeInterface() {
             for (const asset of nextAssets) {
                 const isHeic = asset.originalFileName.toLowerCase().endsWith('.heic') ||
                     asset.originalFileName.toLowerCase().endsWith('.heif');
-                const url = isHeic
-                    ? `${serverUrl}/api/assets/${asset.id}/thumbnail?format=JPEG`
-                    : `${serverUrl}/api/assets/${asset.id}/original`;
+                // Optimization: Always prefetch the JPEG preview, never the full original
+                const url = `${serverUrl}/api/assets/${asset.id}/thumbnail?format=JPEG`;
 
                 try {
                     await ExpoImage.prefetch(url, {

@@ -36,22 +36,33 @@ async function handleRequest(
     const params = await paramsPromise;
     const path = params.path.join('/');
 
-    // Check header first, then cookie
+    // Check header first, then cookie, then environment variables
     let immichUrl = request.headers.get('x-immich-url');
     if (!immichUrl) {
-        immichUrl = request.cookies.get('immich_server_url')?.value || null;
+        immichUrl = request.cookies.get('immich_server_url')?.value || process.env.NEXT_PUBLIC_IMMICH_SERVER_URL || process.env.IMMICH_SERVER_URL || null;
         if (immichUrl) {
-            // Ensure it has /api appended if not present, though cookie usually stores base
-            // The cookie we set is BASE URL. The proxy expects the API root.
-            // We need to match the logic in api.ts
-            immichUrl = `${immichUrl.replace(/\/$/, '')}/api`;
+            // Ensure base URL has /api appended if not already present
+            let baseUrl = immichUrl.replace(/\/$/, '');
+            if (!baseUrl.endsWith('/api')) {
+                baseUrl = `${baseUrl}/api`;
+            }
+            immichUrl = baseUrl;
         }
     }
 
-    // Fix for Node.js IPv6/IPv4 resolution behavior with localhost
-    // This prevents ECONNRESET errors when the backend listens on 127.0.0.1 but Node tries ::1
-    if (immichUrl && immichUrl.includes('localhost')) {
-        immichUrl = immichUrl.replace('localhost', '127.0.0.1');
+    // Fix for Node.js IPv6/IPv4 resolution behavior ONLY when hostname is strictly 'localhost' on host OS.
+    // Preserves host.docker.internal, container names, and custom domain URLs without replacing them.
+    if (immichUrl) {
+        try {
+            const parsedUrl = new URL(immichUrl);
+            const isDocker = process.env.DOCKER_ENV === 'true' || process.env.IS_DOCKER === 'true';
+            if (parsedUrl.hostname === 'localhost' && !isDocker) {
+                parsedUrl.hostname = '127.0.0.1';
+                immichUrl = parsedUrl.toString();
+            }
+        } catch (e) {
+            console.warn('[Proxy] Failed to parse immichUrl:', immichUrl);
+        }
     }
 
     if (!immichUrl) {
